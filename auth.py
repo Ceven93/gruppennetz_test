@@ -1,42 +1,44 @@
-import sqlite3
 import bcrypt
-import streamlit as st
+from database import get_connection
 
-DB_NAME = "soziogramm.db"
 
-# Registrierung
 def register(email, password):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = get_connection()
+    cur = conn.cursor()
 
-    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+    # Prüfen ob E-Mail existiert
+    cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+    existing = cur.fetchone()
 
-    try:
-        c.execute(
-            "INSERT INTO teachers (email, password_hash) VALUES (?, ?)",
-            (email, hashed)
-        )
-        conn.commit()
-        return True
-    except:
-        return False
-    finally:
+    if existing:
         conn.close()
+        return False
+
+    # Passwort hashen
+    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+    cur.execute(
+        "INSERT INTO users (email, password) VALUES (%s, %s)",
+        (email, hashed)
+    )
+
+    conn.commit()
+    conn.close()
+    return True
 
 
-# Login
 def login(email, password):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = get_connection()
+    cur = conn.cursor()
 
-    c.execute("SELECT id, password_hash, analyses_left FROM teachers WHERE email=?", (email,))
-    user = c.fetchone()
+    cur.execute("SELECT id, password FROM users WHERE email = %s", (email,))
+    user = cur.fetchone()
+
     conn.close()
 
     if user:
-        user_id, stored_hash, analyses_left = user
-
-        if bcrypt.checkpw(password.encode(), stored_hash):
-            return user_id, analyses_left
-
+        user_id, hashed_pw = user
+        if bcrypt.checkpw(password.encode(), hashed_pw.encode()):
+            return (user_id,)
+    
     return None

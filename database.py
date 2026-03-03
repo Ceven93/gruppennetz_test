@@ -1,10 +1,8 @@
-import streamlit as st
 import psycopg2
-
+import streamlit as st
 
 def get_connection():
     return psycopg2.connect(st.secrets["DATABASE_URL"])
-
 
 def init_db():
     conn = get_connection()
@@ -49,5 +47,4 @@ def init_db():
     """)
 
     conn.commit()
-    cur.close()
     conn.close()
