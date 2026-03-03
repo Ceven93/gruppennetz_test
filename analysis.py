@@ -1,62 +1,115 @@
-import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
+import pandas as pd
 
+
+# --------------------------------------------------
+# METRIKEN BERECHNEN
+# --------------------------------------------------
 
 def calculate_metrics(df, students):
+
+    n = len(students)
     results = {}
 
     for student in students:
-        ratings = df[df["target"] == student]["rating"]
 
-        if len(ratings) == 0:
-            continue
+        received = df[df["target"] == student]
+        ratings = received["rating"].tolist()
 
-        mean = ratings.mean()
-        acc = (ratings == 6).sum() / (len(students)-1)
-        rej = (ratings == 1).sum() / (len(students)-1)
+        if ratings:
+            mean_rating = round(sum(ratings) / len(ratings), 2)
+            acceptance = round(ratings.count(6) / (n - 1), 2)
+            rejection = round(ratings.count(1) / (n - 1), 2)
+        else:
+            mean_rating = 0
+            acceptance = 0
+            rejection = 0
+
+        in_degree = len(df[(df["target"] == student) & (df["nominated"] == 1)])
+        out_degree = len(df[(df["respondent"] == student) & (df["nominated"] == 1)])
 
         results[student] = {
-            "mean": round(mean, 2),
-            "acceptance": round(acc, 2),
-            "rejection": round(rej, 2)
+            "Mittelwert": mean_rating,
+            "Akzeptanz": acceptance,
+            "Ablehnung": rejection,
+            "In-Degree": in_degree,
+            "Out-Degree": out_degree
         }
 
     return results
 
 
+# --------------------------------------------------
+# SOZIOGRAMM ZEICHNEN
+# --------------------------------------------------
+
 def draw_sociogram(df, students, results):
+
     G = nx.DiGraph()
 
     for s in students:
         G.add_node(s)
 
+    # Kanten
     for _, row in df.iterrows():
         if row["nominated"] == 1:
-            G.add_edge(row["respondent"], row["target"], weight=row["rating"])
+            G.add_edge(row["respondent"], row["target"], rating=row["rating"])
 
     pos = nx.spring_layout(G, seed=42)
 
-    indegree = G.in_degree()
-    sizes = [800 + indegree[s]*400 for s in students]
+    fig, ax = plt.subplots(figsize=(10, 8))
 
-    colors = []
-    for s in students:
-        m = results[s]["mean"]
-        if 1 <= m <= 2:
-            colors.append("orange")
-        elif 3 <= m <= 4:
-            colors.append("yellow")
+    # Knotengrösse = In-Degree
+    node_sizes = [300 + results[s]["In-Degree"] * 200 for s in G.nodes()]
+
+    # Farbe nach Mittelwert
+    node_colors = []
+    for s in G.nodes():
+        mean = results[s]["Mittelwert"]
+        if mean <= 2:
+            node_colors.append("orange")
+        elif mean <= 4:
+            node_colors.append("yellow")
         else:
-            colors.append("green")
+            node_colors.append("green")
 
-    nx.draw_networkx_nodes(G, pos, node_size=sizes, node_color=colors, edgecolors="black")
-    nx.draw_networkx_labels(G, pos)
+    nx.draw_networkx_nodes(
+        G,
+        pos,
+        node_size=node_sizes,
+        node_color=node_colors,
+        ax=ax
+    )
 
-    for u, v, d in G.edges(data=True):
-        style = "dashed" if d["weight"] < 4 else "solid"
-        nx.draw_networkx_edges(G, pos, edgelist=[(u, v)], width=2, style=style,
-                               arrows=True, arrowsize=30, arrowstyle='-|>')
+    nx.draw_networkx_labels(G, pos, ax=ax)
 
-    plt.title("Soziogramm")
-    return plt
+    # Kanten zeichnen
+    for u, v, data in G.edges(data=True):
+
+        rating = data["rating"]
+
+        # gestrichelt bei Bewertung <4
+        style = "dashed" if rating < 4 else "solid"
+
+        nx.draw_networkx_edges(
+            G,
+            pos,
+            edgelist=[(u, v)],
+            arrowstyle="-|>",
+            arrowsize=20,
+            width=1.5,
+            style=style,
+            ax=ax
+        )
+
+    # Legende
+    ax.scatter([], [], c="orange", s=300, label="Mittelwert 0–2")
+    ax.scatter([], [], c="yellow", s=300, label="Mittelwert 3–4")
+    ax.scatter([], [], c="green", s=300, label="Mittelwert 5–6")
+
+    ax.legend()
+    ax.set_title("Soziogramm")
+    ax.axis("off")
+
+    return fig
