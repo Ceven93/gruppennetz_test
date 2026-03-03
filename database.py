@@ -1,8 +1,7 @@
-import psycopg2
-import streamlit as st
+import sqlite3
 
 def get_connection():
-    return psycopg2.connect(st.secrets["DATABASE_URL"])
+    return sqlite3.connect("soziogramm.db", check_same_thread=False)
 
 def init_db():
     conn = get_connection()
@@ -10,7 +9,7 @@ def init_db():
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL
     );
@@ -18,8 +17,8 @@ def init_db():
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS classes (
-        id SERIAL PRIMARY KEY,
-        teacher_id INTEGER REFERENCES users(id),
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        teacher_id INTEGER,
         class_name TEXT,
         date TEXT,
         token TEXT,
@@ -29,16 +28,16 @@ def init_db():
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS students (
-        id SERIAL PRIMARY KEY,
-        class_id INTEGER REFERENCES classes(id),
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER,
         name TEXT
     );
     """)
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS responses (
-        id SERIAL PRIMARY KEY,
-        class_id INTEGER REFERENCES classes(id),
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER,
         respondent TEXT,
         target TEXT,
         rating INTEGER,
