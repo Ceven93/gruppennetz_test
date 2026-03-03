@@ -2,29 +2,29 @@ import streamlit as st
 import uuid
 import pandas as pd
 import sqlite3
-import socket
 import qrcode
 import io
-
 from auth import register, login
 from database import init_db
 from analysis import calculate_metrics, draw_sociogram
 
-DB_NAME = "soziogramm.db"
-init_db()
+# --------------------------------------------------
+# INIT
+# --------------------------------------------------
 
 st.set_page_config(page_title="GruppenNetz", layout="wide")
 
-# =====================================================
-# KINDERSEITE (nur über ?token=...)
-# =====================================================
+DB_NAME = "soziogramm.db"
+init_db()
+
+# --------------------------------------------------
+# KINDERSEITE (über Token)
+# --------------------------------------------------
 
 query_params = st.query_params
 token = query_params.get("token")
 
 if token:
-
-    st.set_page_config(layout="centered")
 
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -54,6 +54,7 @@ if token:
 
     respondent = st.radio("Wie heisst du?", students)
 
+    # Prüfen ob bereits teilgenommen
     existing = pd.read_sql_query(
         "SELECT * FROM responses WHERE class_id=? AND respondent=?",
         conn,
@@ -61,9 +62,10 @@ if token:
     )
 
     if len(existing) > 0:
-        st.success("Du hast bereits teilgenommen. Danke!")
+        st.success("Du hast bereits teilgenommen.")
         st.stop()
 
+    # Nomination
     st.subheader("Mit welchen Kindern spielst du oft?")
     nominations = []
 
@@ -72,6 +74,7 @@ if token:
             if st.checkbox(s, key=f"nom_{s}"):
                 nominations.append(s)
 
+    # Bewertung
     st.subheader("Wie gerne spielst du mit ...")
     ratings = {}
 
@@ -105,10 +108,9 @@ if token:
 
     st.stop()
 
-
-# =====================================================
+# --------------------------------------------------
 # LOGIN SYSTEM
-# =====================================================
+# --------------------------------------------------
 
 if "user_id" not in st.session_state:
     st.session_state.user_id = None
@@ -144,18 +146,18 @@ if st.session_state.user_id is None:
 
     st.stop()
 
-# =====================================================
+# --------------------------------------------------
 # LEHRPERSONENBEREICH
-# =====================================================
+# --------------------------------------------------
 
 page = st.sidebar.selectbox(
     "Navigation",
     ["Dashboard", "Analyse"]
 )
 
-# =====================================================
+# --------------------------------------------------
 # DASHBOARD
-# =====================================================
+# --------------------------------------------------
 
 if page == "Dashboard":
 
@@ -174,10 +176,11 @@ if page == "Dashboard":
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
 
-        c.execute(
-            "INSERT INTO classes (teacher_id, class_name, date, token, closed) VALUES (?, ?, ?, ?, 0)",
-            (st.session_state.user_id, class_name, str(date), token)
-        )
+        c.execute("""
+            INSERT INTO classes 
+            (teacher_id, class_name, date, token, closed)
+            VALUES (?, ?, ?, ?, 0)
+        """, (st.session_state.user_id, class_name, str(date), token))
 
         class_id = c.lastrowid
 
@@ -193,12 +196,11 @@ if page == "Dashboard":
 
         st.success("Klasse erstellt!")
 
-        hostname = socket.gethostname()
-        local_ip = socket.gethostbyname(hostname)
-        url = f"http://{local_ip}:8501/?token={token}"
+        # URL aus Secrets (Cloud-fähig)
+        base_url = st.secrets["APP_URL"]
+        url = f"{base_url}/?token={token}"
 
         st.subheader("Link für Kinder")
-        st.markdown(f"[Hier klicken]({url})")
         st.code(url)
 
         qr = qrcode.make(url)
@@ -206,9 +208,9 @@ if page == "Dashboard":
         qr.save(buf, format="PNG")
         buf.seek(0)
 
-        st.subheader("QR-Code für Kinder")
         st.image(buf)
 
+    # Bestehende Klassen
     st.header("Bestehende Klassen")
 
     conn = sqlite3.connect(DB_NAME)
@@ -265,9 +267,9 @@ if page == "Dashboard":
 
     conn.close()
 
-# =====================================================
+# --------------------------------------------------
 # ANALYSE
-# =====================================================
+# --------------------------------------------------
 
 if page == "Analyse":
 
