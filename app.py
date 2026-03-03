@@ -1,11 +1,11 @@
 import streamlit as st
 import uuid
 import pandas as pd
-import sqlite3
 import qrcode
 import io
+
+from database import get_connection, init_db
 from auth import register, login
-from database import init_db
 from analysis import calculate_metrics, draw_sociogram
 
 # --------------------------------------------------
@@ -13,12 +13,10 @@ from analysis import calculate_metrics, draw_sociogram
 # --------------------------------------------------
 
 st.set_page_config(page_title="GruppenNetz", layout="wide")
-
-DB_NAME = "soziogramm.db"
 init_db()
 
 # --------------------------------------------------
-# KINDERSEITE (über Token)
+# TOKEN PRÜFEN – KINDERSEITE
 # --------------------------------------------------
 
 query_params = st.query_params
@@ -26,11 +24,14 @@ token = query_params.get("token")
 
 if token:
 
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = get_connection()
+    cur = conn.cursor()
 
-    c.execute("SELECT id, closed FROM classes WHERE token=?", (token,))
-    class_data = c.fetchone()
+    cur.execute(
+        "SELECT id, closed FROM classes WHERE token=%s",
+        (token,)
+    )
+    class_data = cur.fetchone()
 
     if not class_data:
         st.error("Ungültiger Zugang.")
@@ -43,7 +44,7 @@ if token:
         st.stop()
 
     df_students = pd.read_sql_query(
-        "SELECT name FROM students WHERE class_id=?",
+        "SELECT name FROM students WHERE class_id=%s",
         conn,
         params=(class_id,)
     )
@@ -54,9 +55,8 @@ if token:
 
     respondent = st.radio("Wie heisst du?", students)
 
-    # Prüfen ob bereits teilgenommen
     existing = pd.read_sql_query(
-        "SELECT * FROM responses WHERE class_id=? AND respondent=?",
+        "SELECT * FROM responses WHERE class_id=%s AND respondent=%s",
         conn,
         params=(class_id, respondent)
     )
@@ -65,7 +65,6 @@ if token:
         st.success("Du hast bereits teilgenommen.")
         st.stop()
 
-    # Nomination
     st.subheader("Mit welchen Kindern spielst du oft?")
     nominations = []
 
@@ -74,15 +73,13 @@ if token:
             if st.checkbox(s, key=f"nom_{s}"):
                 nominations.append(s)
 
-    # Bewertung
     st.subheader("Wie gerne spielst du mit ...")
     ratings = {}
 
     for s in students:
         if s != respondent:
-            st.write(f"**{s}**")
             ratings[s] = st.radio(
-                "",
+                s,
                 [1, 2, 3, 4, 5, 6],
                 horizontal=True,
                 key=f"rate_{s}"
@@ -94,16 +91,16 @@ if token:
             if s != respondent:
                 nominated = 1 if s in nominations else 0
 
-                conn.execute("""
+                cur.execute("""
                     INSERT INTO responses
                     (class_id, respondent, target, rating, nominated)
-                    VALUES (?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s)
                 """, (class_id, respondent, s, ratings[s], nominated))
 
         conn.commit()
         conn.close()
 
-        st.success("Vielen Dank! Du kannst das Fenster nun schliessen.")
+        st.success("Vielen Dank! Das Fenster kann nun geschlossen werden.")
         st.stop()
 
     st.stop()
@@ -173,21 +170,22 @@ if page == "Dashboard":
 
         token = str(uuid.uuid4())
 
-        conn = sqlite3.connect(DB_NAME)
-        c = conn.cursor()
+        conn = get_connection()
+        cur = conn.cursor()
 
-        c.execute("""
+        cur.execute("""
             INSERT INTO classes 
             (teacher_id, class_name, date, token, closed)
-            VALUES (?, ?, ?, ?, 0)
+            VALUES (%s, %s, %s, %s, 0)
+            RETURNING id
         """, (st.session_state.user_id, class_name, str(date), token))
 
-        class_id = c.lastrowid
+        class_id = cur.fetchone()[0]
 
         for name in names.split("\n"):
             if name.strip():
-                c.execute(
-                    "INSERT INTO students (class_id, name) VALUES (?, ?)",
+                cur.execute(
+                    "INSERT INTO students (class_id, name) VALUES (%s, %s)",
                     (class_id, name.strip())
                 )
 
@@ -196,7 +194,6 @@ if page == "Dashboard":
 
         st.success("Klasse erstellt!")
 
-        # URL aus Secrets (Cloud-fähig)
         base_url = st.secrets["APP_URL"]
         url = f"{base_url}/?token={token}"
 
@@ -211,12 +208,13 @@ if page == "Dashboard":
         st.image(buf)
 
     # Bestehende Klassen
+
     st.header("Bestehende Klassen")
 
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
 
     df_classes = pd.read_sql_query(
-        "SELECT * FROM classes WHERE teacher_id=?",
+        "SELECT * FROM classes WHERE teacher_id=%s",
         conn,
         params=(st.session_state.user_id,)
     )
@@ -232,7 +230,7 @@ if page == "Dashboard":
         class_id = row["id"]
 
         df_students = pd.read_sql_query(
-            "SELECT name FROM students WHERE class_id=?",
+            "SELECT name FROM students WHERE class_id=%s",
             conn,
             params=(class_id,)
         )
@@ -240,7 +238,7 @@ if page == "Dashboard":
         students = df_students["name"].tolist()
 
         df_responses = pd.read_sql_query(
-            "SELECT DISTINCT respondent FROM responses WHERE class_id=?",
+            "SELECT DISTINCT respondent FROM responses WHERE class_id=%s",
             conn,
             params=(class_id,)
         )
@@ -258,8 +256,9 @@ if page == "Dashboard":
         if row["closed"] == 0 and len(missing) == 0:
             if st.button(f"Erhebung abschliessen {class_id}"):
 
-                conn.execute(
-                    "UPDATE classes SET closed=1 WHERE id=?",
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE classes SET closed=1 WHERE id=%s",
                     (class_id,)
                 )
                 conn.commit()
@@ -275,10 +274,10 @@ if page == "Analyse":
 
     st.title("Analyse")
 
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
 
     df_classes = pd.read_sql_query(
-        "SELECT * FROM classes WHERE closed=1 AND teacher_id=?",
+        "SELECT * FROM classes WHERE closed=1 AND teacher_id=%s",
         conn,
         params=(st.session_state.user_id,)
     )
@@ -298,7 +297,7 @@ if page == "Analyse":
     ]["id"].values[0]
 
     df_students = pd.read_sql_query(
-        "SELECT name FROM students WHERE class_id=?",
+        "SELECT name FROM students WHERE class_id=%s",
         conn,
         params=(class_id,)
     )
@@ -306,7 +305,7 @@ if page == "Analyse":
     students = df_students["name"].tolist()
 
     df_responses = pd.read_sql_query(
-        "SELECT * FROM responses WHERE class_id=?",
+        "SELECT * FROM responses WHERE class_id=%s",
         conn,
         params=(class_id,)
     )
